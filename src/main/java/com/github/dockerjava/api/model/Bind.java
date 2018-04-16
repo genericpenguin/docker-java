@@ -4,6 +4,8 @@ import org.apache.commons.lang.builder.EqualsBuilder;
 import org.apache.commons.lang.builder.HashCodeBuilder;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Represents a host path being bind mounted as a {@link Volume} in a Docker container.
@@ -97,7 +99,10 @@ public class Bind implements Serializable {
      */
     public static Bind parse(String serialized) {
         try {
-            String[] parts = serialized.split(":");
+            List<String> split = splitN(serialized, 3);
+            String[] parts = new String[split.size()];
+            parts = split.toArray(parts);
+
             switch (parts.length) {
             case 2: {
                 return new Bind(parts[0], new Volume(parts[1]));
@@ -133,6 +138,68 @@ public class Bind implements Serializable {
         } catch (Exception e) {
             throw new IllegalArgumentException("Error parsing Bind '" + serialized + "'", e);
         }
+    }
+    // from https://github.com/robvanmieghem/docker/blob/master/volume/volume.go
+    private static List<String> splitN(String raw, int n) {
+        ArrayList<String> array = new ArrayList<String>();
+        if ((raw.length() == 0) || (raw.charAt(0) == ':')) {
+            return null;
+        }
+
+        // numberOfParts counts the number of parts separated by a separator colon
+        int numberOfParts = 0;
+        // left represents the left-most cursor in raw, updated at every `:` character considered as a separator.
+        int left = 0;
+
+        // right represents the right-most cursor in raw incremented with the loop. Note this
+        // starts at index 1 as index 0 is already handle above as a special case.
+        for (int right = 1; right < raw.length(); right++) {
+            // stop parsing if reached maximum number of parts
+            if ((n >= 0) && (numberOfParts >= n)) {
+                break;
+            }
+            if (raw.charAt(right) != ':') {
+                continue;
+            }
+
+            char potentialDriveLetter = raw.charAt(right - 1);
+            if (((potentialDriveLetter >= 'A') && (potentialDriveLetter <= 'Z')) || ((potentialDriveLetter >= 'a') &&
+                    (potentialDriveLetter <= 'z'))) {
+                if (right > 1) {
+                    char beforePotentialDriveLetter = raw.charAt(right - 2);
+                    if ((beforePotentialDriveLetter != ':') &&
+                            (beforePotentialDriveLetter != '/') &&
+                            (beforePotentialDriveLetter != '\\')) {
+                        // e.g. `C:` is not preceded by any delimiter, therefore it was not a drive letter
+                        // but a path ending with `C:`.
+                        array.add(raw.substring(left, right));
+                        left = right + 1;
+                        numberOfParts++;
+                    }
+                    // else, `C:` is considered as a drive letter and not as a delimiter, so
+                    // we continue parsing.
+                }
+                // if right == 1, then `C:` is the beginning of the raw string, therefore `:` is again not
+                // considered a delimiter and we continue parsing.
+            } else {
+                // if `:` is not preceded by a potential drive letter, then consider it as a delimiter.
+                array.add(raw.substring(left, right));
+                left = right + 1;
+                numberOfParts++;
+            }
+        }
+        // need to take care of the last part
+        if (left < raw.length()) {
+            if ((n >= 0) && (numberOfParts >= n)) {
+                // if the maximum number of parts is reached, just append the rest to the last part
+                // left-1 is at the last `:` that needs to be included since not considered a separator.
+                String lastElement = array.get(n - 1);
+                array.set(n - 1, lastElement + raw.substring(left));
+            } else {
+                array.add(raw.substring(left));
+            }
+        }
+        return array;
     }
 
     @Override
